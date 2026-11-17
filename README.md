@@ -1,85 +1,75 @@
 # Real-Time Data Pipeline with Streaming Ingestion and Live Dashboard
 
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-3.8-231F20?logo=apachekafka&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Apache Kafka 3.8](https://img.shields.io/badge/Apache%20Kafka-3.8-231F20?logo=apachekafka)
+![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)
+![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?logo=streamlit)
+![Docker Compose](https://img.shields.io/badge/Containerized-Docker%20Compose-2496ED?logo=docker)
 
-An end-to-end streaming analytics project. A producer emits e-commerce order events into **Apache Kafka**, a Python stream processor validates them and loads **PostgreSQL**, and a **Streamlit** dashboard turns the data into live KPIs, charts and operational alerts that refresh every few seconds.
+A runnable streaming analytics demo: a Python producer sends simulated e-commerce orders to Kafka, a consumer validates and stores them in PostgreSQL, and a Streamlit dashboard displays live metrics, charts, and data-quality alerts.
 
-<!-- Add a screenshot or GIF of the running dashboard, then uncomment:
-![Live dashboard](docs/dashboard.png)
--->
+## Contents
 
-## Table of Contents
-
-- [Why This Project](#why-this-project)
 - [Architecture](#architecture)
-- [Key Features](#key-features)
-- [Tech Stack](#tech-stack)
-- [Quick Start](#quick-start)
-- [What You'll See](#what-youll-see)
-- [Data Model](#data-model)
-- [Data Quality and Reliability](#data-quality-and-reliability)
-- [Alerts](#alerts)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Run with Docker Compose](#run-with-docker-compose)
+- [Services and ports](#services-and-ports)
 - [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Testing](#testing)
-- [Useful SQL](#useful-sql)
+- [Useful commands](#useful-commands)
+- [Data model](#data-model)
+- [Run the tests](#run-the-tests)
 - [Troubleshooting](#troubleshooting)
-- [Skills Demonstrated](#skills-demonstrated)
-- [Future Improvements](#future-improvements)
+- [Deployment and security](#deployment-and-security)
+- [Project structure](#project-structure)
 - [License](#license)
-
-## Why This Project
-
-Batch reporting leaves teams working with data that is hours old. This project shows the streaming alternative: events are ingested continuously, validated on arrival, stored in an analytics database and visualised within seconds. It also treats data quality as a first-class concern, so bad data is quarantined and visible instead of silently corrupting the numbers.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    P["Producer<br/>simulated order events"] -->|JSON, key = user_id| K[("Kafka topic<br/>orders - 3 partitions")]
-    K --> C["Stream processor<br/>validate + batch write"]
-    C -->|valid| O[("PostgreSQL<br/>orders")]
-    C -->|invalid| D[("PostgreSQL<br/>dead_letter")]
-    O --> S["Streamlit dashboard<br/>auto-refresh + alerts"]
-    D --> S
+    P["Order event producer"] -->|"JSON, keyed by user_id"| K[("Kafka: orders")]
+    K --> C["Python consumer<br/>validate and batch"]
+    C -->|"valid orders"| DB[("PostgreSQL: orders")]
+    C -->|"invalid messages"| DL[("PostgreSQL: dead_letter")]
+    DB --> D["Streamlit dashboard"]
+    DL --> D
 ```
 
-**Data flow**
+1. The producer generates simulated orders at an adjustable rate. It deliberately sends a small number of invalid and duplicate messages.
+2. The consumer validates messages, writes valid orders and rejected messages to PostgreSQL, then commits Kafka offsets.
+3. The dashboard queries PostgreSQL and refreshes automatically.
 
-1. The **producer** generates order events at an average rate that rises and falls over time. A small share of messages is deliberately corrupted or duplicated to exercise the downstream safeguards.
-2. The **consumer** reads batches from Kafka, validates every message against the event contract, and writes valid orders and rejected messages to PostgreSQL in one transaction.
-3. Only after that transaction commits does the consumer commit its Kafka offsets.
-4. The **dashboard** queries PostgreSQL and re-renders on a configurable interval.
+The order ID and Kafka topic/partition/offset constraints make inserts idempotent. If the consumer restarts after a database commit but before committing Kafka offsets, a redelivered message does not create a duplicate row.
 
-## Key Features
+## Features
 
-- **Streaming ingestion** with Kafka producers and a consumer group; the topic has 3 partitions keyed by `user_id`
-- **Data contract and validation** on every message: types, ranges, allowed values and timestamps
-- **Dead-letter table** that stores each rejected message with the reason it failed
-- **Reliable delivery**: offsets are committed after the database commit (at-least-once), and inserts are idempotent, so redelivered or duplicated messages never create duplicate rows
-- **Live dashboard** with KPIs, revenue and order trends, category, product and country breakdowns, latest orders and the dead-letter queue
-- **Operational alerts** for a stalled stream, a high invalid-message rate, high pipeline latency and sudden revenue drops
-- **One-command setup** with Docker Compose and unit tests for validation, event generation and alert rules
+- Kafka running in single-node KRaft mode (no ZooKeeper).
+- Event validation for required fields, types, ranges, allowed values, and timestamps.
+- Dead-letter storage for invalid messages and their validation reasons.
+- PostgreSQL analytics tables and an `orders_per_minute` view.
+- Live dashboard for order and revenue KPIs, trends, category/product/country breakdowns, recent orders, and invalid messages.
+- Alerts for a stalled stream, invalid-message rate, pipeline latency, and revenue drops.
 
-## Tech Stack
+### Dashboard alerts
 
-| Layer | Technology |
+| Alert | Trigger |
 |---|---|
-| Streaming | Apache Kafka 3.8 (KRaft mode, no ZooKeeper), `confluent-kafka` |
-| Processing | Python 3.12 |
-| Storage | PostgreSQL 16 |
-| Dashboard | Streamlit, Plotly, pandas, SQLAlchemy |
-| Infrastructure | Docker, Docker Compose |
-| Testing | pytest |
+| Stream stalled | No order has been ingested for more than 30 seconds |
+| High invalid-message rate | More than 10% of messages in the selected window fail validation |
+| High pipeline latency | Average event-to-ingestion latency exceeds 10 seconds |
+| Revenue drop | Revenue in the last five minutes is less than half of the previous five minutes |
 
-## Quick Start
+## Requirements
 
-**Requirements:** Docker with Docker Compose.
+- Docker Desktop on macOS/Windows, or Docker Engine with the Docker Compose plugin on Linux.
+- Git, if cloning the repository.
+
+The Docker setup builds the Python application image and runs all five services. You do not need to install Python or Kafka on the host to run the application with Compose.
+
+## Run with Docker Compose
+
+Clone the repository and start the services:
 
 ```bash
 git clone https://github.com/theyashkhatri/Real-Time-Data-Pipeline-with-Streaming-Ingestion-and-Live-Dashboard.git
@@ -87,182 +77,194 @@ cd Real-Time-Data-Pipeline-with-Streaming-Ingestion-and-Live-Dashboard
 docker compose up -d --build
 ```
 
-Open the dashboard at **http://localhost:8501**. Data should start appearing within a few seconds; on a first start Kafka can take up to a minute to become healthy.
-
-| Service | Address |
-|---|---|
-| Dashboard | http://localhost:8501 |
-| PostgreSQL | `localhost:5432` (user `pipeline`, password `pipeline`, database `analytics`) |
-| Kafka (from your host) | `localhost:29092` |
-
-Handy commands (see the `Makefile`):
+The first build may take several minutes. Check the service status:
 
 ```bash
-make logs     # follow producer and consumer logs
-make psql     # open a SQL shell on the analytics database
-make down     # stop all services
-make reset    # stop all services and delete stored data
+docker compose ps
 ```
 
-To change traffic volume, invalid or duplicate rates, or credentials, copy `.env.example` to `.env` and edit it before starting.
+Wait for Kafka and PostgreSQL to report healthy, then open **http://localhost:8501**. On the first start, Kafka may need up to a minute to become ready. The producer and consumer logs should show events being sent and processed:
 
-## What You'll See
+```bash
+docker compose logs -f producer consumer
+```
 
-| Dashboard section | What it shows |
-|---|---|
-| Alert banner | Green when healthy; warnings or errors when a rule below is triggered |
-| KPI row | Orders, revenue, average order value, orders in the last minute, invalid messages |
-| Pipeline latency | Average time from event creation to being stored |
-| Trend charts | Revenue per minute and orders per minute |
-| Breakdowns | Revenue by category, top 5 products, orders by country |
-| Latest orders | The 15 most recent orders |
-| Dead-letter queue | The latest invalid messages with the reason each was rejected |
+## Services and ports
 
-Use the sidebar to choose the time window (5, 15, 30 or 60 minutes) and the refresh interval. Revenue excludes cancelled orders.
-
-## Data Model
-
-**Event contract** (JSON message on the `orders` topic):
-
-| Field | Rule |
-|---|---|
-| `order_id` | Non-empty string, up to 64 characters; unique per order |
-| `user_id` | Positive integer |
-| `product` | Non-empty string |
-| `category` | One of `Electronics`, `Home`, `Fashion`, `Books`, `Sports`, `Beauty` |
-| `quantity` | Integer from 1 to 20 |
-| `unit_price` | Number greater than 0 and at most 10,000 |
-| `country` | 2-letter code (stored upper-case) |
-| `payment_method` | One of `card`, `upi`, `paypal`, `bank_transfer`, `wallet` |
-| `status` | One of `completed`, `pending`, `cancelled` |
-| `event_time` | ISO-8601 timestamp, not more than 5 minutes in the future; stored as UTC |
-
-**Tables** (defined in `database/schema.sql`):
-
-- `orders`: validated orders, with `order_id` as the primary key, a computed `total_amount`, the order's `event_time` and the pipeline's `ingested_at`
-- `dead_letter`: rejected messages with Kafka topic, partition and offset, the raw payload and the error reason
-- `orders_per_minute`: a view that rolls orders up per minute for ad-hoc analysis
-
-## Data Quality and Reliability
-
-| Decision | Why |
-|---|---|
-| Commit Kafka offsets only after the database commit | A crash can cause a re-read but never data loss |
-| `order_id` primary key with `ON CONFLICT DO NOTHING` | Producer duplicates and redeliveries are harmless, so results are effectively exactly-once |
-| Dead-letter table instead of dropping bad messages | Quality problems stay visible and debuggable; replays of the same Kafka offset are ignored |
-| Batched inserts with `execute_values` | Far fewer database round trips than row-by-row writes |
-| Partition key = `user_id` | Keeps each user's events ordered while allowing parallel consumers |
-| Track both `event_time` and `ingested_at` | Allows end-to-end pipeline latency to be measured |
-| Exit on database failure and let Docker restart | The consumer group resumes from the last committed offset, so nothing is skipped |
-
-## Alerts
-
-| Alert | Level | Triggers when |
+| Service | Purpose | Host address |
 |---|---|---|
-| Stream stalled | Error | No new order has been ingested for more than 30 seconds |
-| High invalid-message rate | Warning | More than 10% of messages in the window failed validation |
-| High pipeline latency | Warning | Average latency exceeds 10 seconds |
-| Revenue drop | Warning | Revenue in the last 5 minutes is below 50% of the previous 5 minutes |
+| `dashboard` | Streamlit live dashboard | [http://localhost:8501](http://localhost:8501) |
+| `postgres` | Analytics database | `localhost:5432` |
+| `kafka` | Kafka external listener for host-based clients | `localhost:29092` |
+| `producer` | Simulated order-event producer | No host port |
+| `consumer` | Kafka-to-PostgreSQL stream processor | No host port |
 
-Thresholds live in `dashboard/alerts.py`.
+The producer and consumer connect to Kafka and PostgreSQL over the Compose network; their service names are used as hostnames.
 
 ## Configuration
 
-All settings are environment variables with defaults (see `.env.example`).
+Docker Compose reads optional settings from a `.env` file in the project root. Create one to override the defaults:
+
+```dotenv
+POSTGRES_USER=pipeline
+POSTGRES_PASSWORD=replace-with-a-strong-password
+POSTGRES_DB=analytics
+
+EVENTS_PER_SECOND=5
+INVALID_RATE=0.03
+DUPLICATE_RATE=0.01
+BATCH_SIZE=50
+BATCH_TIMEOUT_SECONDS=2
+KAFKA_TOPIC=orders
+CONSUMER_GROUP=orders-processor
+```
 
 | Variable | Default | Description |
-|---|---|---|
-| `EVENTS_PER_SECOND` | `5` | Average producer rate (varies by about +/-50% over time) |
-| `INVALID_RATE` | `0.03` | Share of deliberately corrupted messages |
-| `DUPLICATE_RATE` | `0.01` | Share of messages sent twice |
-| `BATCH_SIZE` | `50` | Maximum messages per database batch |
-| `BATCH_TIMEOUT_SECONDS` | `2` | Maximum wait to fill a batch |
-| `KAFKA_TOPIC` | `orders` | Topic name |
+|---|---:|---|
+| `POSTGRES_USER` | `pipeline` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | `pipeline` | PostgreSQL password; replace it outside local development |
+| `POSTGRES_DB` | `analytics` | PostgreSQL database name |
+| `EVENTS_PER_SECOND` | `5` | Approximate producer rate; it varies over time |
+| `INVALID_RATE` | `0.03` | Fraction of generated messages that are intentionally invalid |
+| `DUPLICATE_RATE` | `0.01` | Fraction of generated messages that are intentionally sent twice |
+| `BATCH_SIZE` | `50` | Maximum messages consumed per batch |
+| `BATCH_TIMEOUT_SECONDS` | `2` | Maximum time to wait for a batch |
+| `KAFKA_TOPIC` | `orders` | Kafka topic name |
 | `CONSUMER_GROUP` | `orders-processor` | Kafka consumer group |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `pipeline` / `pipeline` / `analytics` | Database credentials |
 
-The default credentials are for local development only; change them before exposing the stack anywhere.
-
-## Project Structure
-
-```
-├── common/
-│   ├── config.py          # environment-based settings
-│   └── schema.py          # event contract and validation
-├── producer/
-│   └── producer.py        # simulated order stream (with bad and duplicate messages)
-├── consumer/
-│   └── consumer.py        # Kafka -> validate -> PostgreSQL, manual offset commits
-├── database/
-│   └── schema.sql         # orders, dead_letter, orders_per_minute view
-├── dashboard/
-│   ├── app.py             # Streamlit app
-│   └── alerts.py          # alert rules (unit-tested)
-├── tests/                 # pytest suite
-├── docker-compose.yml
-├── Dockerfile
-├── Makefile
-└── requirements.txt
-```
-
-## Testing
+After changing Compose environment values, recreate the affected services:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
+docker compose up -d
+```
+
+PostgreSQL initializes `database/schema.sql` only when its data directory is first created. Changing that SQL file does not automatically modify an existing database volume.
+
+## Useful commands
+
+```bash
+docker compose ps                         # show service status
+docker compose logs -f                    # follow all service logs
+docker compose logs -f dashboard          # follow dashboard logs
+docker compose logs -f producer consumer  # follow pipeline logs
+docker compose restart                    # restart services
+docker compose down                       # stop services, keep database data
+```
+
+Open a PostgreSQL shell using the configured container credentials:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+The database files are kept in a named Docker volume when you stop the stack. To remove the containers **and permanently delete the stored database data**, run:
+
+```bash
+docker compose down -v
+```
+
+## Data model
+
+### Orders
+
+Valid events are written to `orders`. Each row includes the order ID, user, product, category, quantity, unit price, computed total, country, payment method, status, event time, and ingestion time. `order_id` is the primary key, so duplicate orders are ignored.
+
+Required event fields:
+
+`order_id`, `user_id`, `product`, `category`, `quantity`, `unit_price`, `country`, `payment_method`, `status`, and `event_time`.
+
+The validator requires positive integer user IDs, quantities from 1 to 20, unit prices greater than 0 and no more than 10,000, a two-letter country code, supported category/payment/status values, and an ISO-8601 event time no more than five minutes in the future.
+
+### Dead letters and rollup
+
+- `dead_letter` stores the Kafka topic, partition, offset, raw payload, and validation reason for rejected messages.
+- `orders_per_minute` is a PostgreSQL view with per-minute order count, revenue, and average order value. The dashboard queries the base tables directly.
+
+Example queries:
+
+```sql
+-- Recent per-minute rollups
+SELECT *
+FROM orders_per_minute
+WHERE minute >= now() - interval '15 minutes'
+ORDER BY minute DESC;
+
+-- Most common validation failures
+SELECT error_reason, count(*)
+FROM dead_letter
+GROUP BY error_reason
+ORDER BY count(*) DESC;
+
+-- Average ingestion latency by minute
+SELECT date_trunc('minute', ingested_at) AS minute,
+       avg(extract(epoch FROM ingested_at - event_time)) AS latency_seconds
+FROM orders
+GROUP BY 1
+ORDER BY 1 DESC
+LIMIT 10;
+```
+
+## Run the tests
+
+The test suite can run on the host with Python 3.12:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
 pytest -q
 ```
 
-The tests cover event validation (valid, malformed and boundary cases), the producer's generators (every generated event is valid and every corrupted one is rejected) and the alert rules.
-
-## Useful SQL
-
-```sql
--- Revenue and orders per minute (last 15 minutes)
-SELECT * FROM orders_per_minute WHERE minute > now() - interval '15 minutes';
-
--- Most common validation failures
-SELECT error_reason, count(*) FROM dead_letter GROUP BY 1 ORDER BY 2 DESC;
-
--- Average ingestion latency per minute
-SELECT date_trunc('minute', ingested_at) AS minute,
-       avg(extract(epoch FROM ingested_at - event_time)) AS latency_seconds
-FROM orders GROUP BY 1 ORDER BY 1 DESC LIMIT 10;
-
--- Revenue by country, excluding cancelled orders
-SELECT country, sum(total_amount) AS revenue
-FROM orders WHERE status <> 'cancelled' GROUP BY 1 ORDER BY 2 DESC;
-```
+The tests cover event validation, generated and corrupted producer events, and alert rules.
 
 ## Troubleshooting
 
 | Symptom | What to check |
 |---|---|
-| Dashboard says it is waiting for the first events | Run `make logs`; Kafka may still be starting on a first run |
-| "Stream stalled" alert | The producer or consumer stopped; run `docker compose ps` and `docker compose logs consumer` |
-| "Database unavailable" message | PostgreSQL is still starting or down; the dashboard retries on every refresh |
-| Port already in use | Change the `5432` or `8501` mapping under `ports` in `docker-compose.yml` |
-| Want a clean slate | Run `make reset` to remove containers and stored data |
+| `docker: command not found` | Install and start Docker Desktop (macOS/Windows), or install Docker Engine and the Compose plugin (Linux). |
+| Dashboard does not open | Confirm `docker compose ps` shows `dashboard` running; inspect `docker compose logs --tail=100 dashboard`. |
+| Dashboard says it is waiting for events | Kafka may still be starting. Check `docker compose ps` and `docker compose logs --tail=100 kafka producer consumer`. |
+| Dashboard reports database unavailable | Check that `postgres` is healthy with `docker compose ps`; inspect `docker compose logs --tail=100 postgres`. |
+| Stream appears stalled | Check producer/consumer status and logs with `docker compose logs --tail=100 producer consumer`. |
+| Port is already in use | Change the relevant host port mapping in `docker-compose.yml`, then run `docker compose up -d`. |
+| Schema changes do not appear | The initialization SQL runs only for a new PostgreSQL data directory. Back up any data before resetting the volume. |
+| Need to start over | `docker compose down -v` removes the database volume and all stored data. |
 
-## Skills Demonstrated
+## Deployment and security
 
-- Designing an event-driven architecture and a data contract
-- Stream processing with Kafka consumer groups, partitioning and manual offset management
-- Building idempotent, fault-tolerant ingestion with a dead-letter pattern
-- SQL schema design, indexing and analytical queries
-- Operational monitoring: freshness, latency and data-quality alerts
-- Building interactive dashboards with Streamlit and Plotly
-- Containerised, reproducible environments with Docker Compose
-- Writing unit tests for validation and business rules
+This Compose configuration is intended for local development and single-host demonstrations. It runs one Kafka broker and maps the dashboard, PostgreSQL, and Kafka ports to the host. The default database credentials are not suitable for a public deployment.
 
-## Future Improvements
+Before making a deployment reachable outside your machine:
 
-- Anomaly detection on the live stream
-- Schema Registry with Avro for enforced, versioned contracts
-- Deployment to the cloud with managed Kafka and PostgreSQL
-- GitHub Actions CI to run tests and build the image on every push
-- Prometheus and Grafana for infrastructure metrics
+- Set a strong, unique PostgreSQL password in `.env`.
+- Restrict PostgreSQL (`5432`) and Kafka (`29092`) access with the host firewall; do not expose them publicly unless you have a specific, secured use case.
+- Serve the dashboard through HTTPS, typically using a reverse proxy, rather than exposing an unencrypted public endpoint.
+- Keep the PostgreSQL data volume persistent and back it up.
+- For production, use appropriately secured and highly available Kafka and PostgreSQL deployments; this single-broker Compose setup is not highly available.
+
+## Project structure
+
+```text
+common/
+  config.py          Environment-based application settings
+  schema.py          Order event contract and validation
+producer/
+  producer.py        Simulated Kafka event producer
+consumer/
+  consumer.py        Kafka consumer and PostgreSQL writer
+database/
+  schema.sql         PostgreSQL tables, indexes, and rollup view
+dashboard/
+  app.py             Streamlit dashboard
+  alerts.py          Operational alert rules
+tests/               Unit tests
+Dockerfile
+docker-compose.yml
+Makefile
+requirements.txt
+requirements-dev.txt
+```
 
 ## License
 
-Released under the [MIT License](LICENSE).
+This project is released under the [MIT License](LICENSE).
