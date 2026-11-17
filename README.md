@@ -8,6 +8,8 @@
 
 A runnable streaming analytics demo: a Python producer sends simulated e-commerce orders to Kafka, a consumer validates and stores them in PostgreSQL, and a Streamlit dashboard displays live metrics, charts, and data-quality alerts.
 
+For a fuller project report—including objectives, component design, data model, setup, operations, and limitations—see [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md).
+
 ## Contents
 
 - [Architecture](#architecture)
